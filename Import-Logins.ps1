@@ -1,3 +1,52 @@
+function Get-AllPmaxLogins {
+    param (
+        [Parameter(ValueFromPipeline = $true)]
+        [Alias("Sid")]
+        [string[]]$arrayIds = @()
+    )
+    begin {
+        $timeStamp = Get-Date -Format "yyyyMMdd@HHmm"
+        # Check if the OS or Linux
+        if ($IsLinux) {
+            if (test-path "/opt/emc/SYMCLI/bin/symcli") {
+                $SYMCLIPATH = "/opt/emc/SYMCLI/bin"
+            }
+        }
+        while (-not (Test-Path $newPath)) {
+            $newPath = Read-Host -Prompt "symcli not found. Enter path to symcli" $newPath
+        }
+        # strip filename from path
+        $SYMCLIPATH = Split-Path $newPath -Parent
+        try {
+            # If we do not have any arrayIds, get a list from symcfg
+            if (!$arrayIds) {
+                $arrayIds = & "$SYMCLIPATH/symcfg" list
+                $arrayIds = ($arrayIds -Split '\r?\n' | 
+                    Select-String -Pattern '([0-9]{12}) \w+\s+PowerMax_2000' -AllMatches).Matches |
+                    ForEach-Object { $_.Groups[1].Value }
+            }
+        }
+        catch {
+            Write-Error "Unable to get list of arrays: $_"
+        }
+    }
+    process {
+        try {
+                foreach ($arrayId in $arrayIds) {
+                    Write-Verbose "Collecting logins from array $arrayId"
+                    & "$SYMCLIPATH/symaccess" list logins -v -sid $arrayId | Out-File -FilePath "logins-$arrayId-$timeStamp.txt"
+                }
+        }
+        catch {
+                Write-Error "Unable to get logins: $_"
+        }
+    }
+    end {
+        Write-Verbose "Processed $($arrayIds.Count) arrays."
+    }
+    
+}
+
 function Import-PmaxLogins {
     <#
     .SYNOPSIS

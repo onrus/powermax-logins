@@ -6,17 +6,12 @@ function Get-AllPmaxLogins {
     )
     begin {
         $timeStamp = Get-Date -Format "yyyyMMdd@HHmm"
-        # Check if the OS or Linux
-        if ($IsLinux) {
-            if (test-path "/opt/emc/SYMCLI/bin/symcli") {
-                $SYMCLIPATH = "/opt/emc/SYMCLI/bin"
-            }
+        $SYMCLIPATH = "/opt/emc/SYMCLI/bin/symcli"
+        while (-not (Test-Path $SYMCLIPATH)) {
+            $SYMCLIPATH = Read-Host -Prompt "symcli not found. Enter path to symcli or Ctrl-C to exit"
         }
-        while (-not (Test-Path $newPath)) {
-            $newPath = Read-Host -Prompt "symcli not found. Enter path to symcli" $newPath
-        }
-        # strip filename from path
-        $SYMCLIPATH = Split-Path $newPath -Parent
+        # remove symcli part from path
+        $SYMCLIPATH = $SYMCLIPATH -replace '/symcli', ''
         try {
             # If we do not have any arrayIds, get a list from symcfg
             if (!$arrayIds) {

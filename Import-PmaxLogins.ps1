@@ -27,13 +27,13 @@ function Get-AllPmaxLogins {
     }
     process {
         try {
-                foreach ($arrayId in $arrayIds) {
-                    Write-Verbose "Collecting logins from array $arrayId"
-                    & "$SYMCLIPATH/symaccess" list logins -v -sid $arrayId | Out-File -FilePath "logins-$arrayId-$timeStamp.txt"
-                }
+            foreach ($arrayId in $arrayIds) {
+                Write-Verbose "Collecting logins from array $arrayId"
+                & "$SYMCLIPATH/symaccess" list logins -v -sid $arrayId | Out-File -FilePath "logins-$arrayId-$timeStamp.txt"
+            }
         }
         catch {
-                Write-Error "Unable to get logins: $_"
+            Write-Error "Unable to get logins: $_"
         }
     }
     end {
@@ -53,14 +53,14 @@ function Import-PmaxLogins {
         Below is and example:
 
                 
-            Symmetrix ID            : 000197901042
+            Symmetrix ID            : 000190001234
 
             Director Identification : FA-1D
             Director Port           : 004
-            WWN Port Name           : 50000973b0104804
+            WWN Port Name           : 50000123b0001234
 
-            Originator Node wwn : 200000051efd0ba0
-            Originator Port wwn : 100000051efd0ba0
+            Originator Node wwn : 2000000123456789
+            Originator Port wwn : 1000000123456789
             Host QN             : N/A
             Host ID             : N/A
             ip Address          : N/A
@@ -72,8 +72,8 @@ function Import-PmaxLogins {
             Last Active Log-In  : 11:34:07 PM on Wed May 25,2022
 
 
-            Originator Node wwn : 200000051efd3cb3
-            Originator Port wwn : 100000051efd3cb3
+            Originator Node wwn : 200000023456780
+            Originator Port wwn : 100000023456780
             etc..
 
     .PARAMETER Path
@@ -82,7 +82,7 @@ function Import-PmaxLogins {
     .EXAMPLE
         # Process all logins*.txt files in current directory and save the output and array
         $allLogins = Get-PowerMaxLogins
-        $allLogins|where {$_.wwpn -match 'c050760aa89f005[0-7]'}|ft
+        $allLogins|where {$_.wwpn -match '10000002345678[0-7]'}|ft
 
         # Process all logins*.txt files in current directory and output to console
         Get-PowerMaxLogins | format-table
@@ -267,7 +267,6 @@ if ($MyInvocation.InvocationName -ne '.') {
     $VerbosePreference = "Continue"
     $OutputFile = "pmax-logins.csv"
     $allLogins = Import-PmaxLogins -Path "logins-*.txt"
-    # $allLogins = Import-PmaxLogins -Path "logins-000197901097.txt"
     $allLogins | where-object { $_.wwpn -match 'c050760aa89f005[0-7]' } | format-table -Wrap
     $allLogins | Export-Csv -Path $OutputFile -NoTypeInformation
      

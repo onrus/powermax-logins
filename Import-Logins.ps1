@@ -1,88 +1,230 @@
-'''
-This script processes login information from EMC Powermax storage systems.
+function Import-PmaxLogins {
+    <#
+    .SYNOPSIS
+        Processes login information from EMC Powermax storage systems.
+    
+    .DESCRIPTION
+        This script parses login information from text files and exports them to a CSV file.
+        It processes multiple log files and combines the results. The files must contain the output of 'symaccess list logins -v'.
+        Below is and example:
 
-Symmetrix ID            : 000197901042
+                
+            Symmetrix ID            : 000197901042
 
-Director Identification : FA-1D
-Director Port           : 004
-WWN Port Name           : 50000973b0104804
+            Director Identification : FA-1D
+            Director Port           : 004
+            WWN Port Name           : 50000973b0104804
 
-   Originator Node wwn : 200000051efd0ba0
-   Originator Port wwn : 100000051efd0ba0
-   Host QN             : N/A
-   Host ID             : N/A
-   ip Address          : N/A
-   Protocol            : SCSI_FC
-   User-generated Name : /
-   FCID                : 798d40
-   Logged In           : No
-   On Fabric           : Yes
-   Last Active Log-In  : 11:34:07 PM on Wed May 25,2022
+            Originator Node wwn : 200000051efd0ba0
+            Originator Port wwn : 100000051efd0ba0
+            Host QN             : N/A
+            Host ID             : N/A
+            ip Address          : N/A
+            Protocol            : SCSI_FC
+            User-generated Name : /
+            FCID                : 798d40
+            Logged In           : No
+            On Fabric           : Yes
+            Last Active Log-In  : 11:34:07 PM on Wed May 25,2022
 
-   
-   Originator Node wwn : 200000051efd3cb3
-   Originator Port wwn : 100000051efd3cb3
-   etc..
-'''
-$DebugPreference = 'SilentlyContinue'
-$array_count = 0
-$allLogins = [System.Collections.ArrayList]::new()
-Get-ChildItem .\logins-*.txt | ForEach-Object {
-    $filename = $_.Name
-    Write-Debug "Processing file: $filename"
-    $file = Get-Content $_ -Raw
-    $textbolocks = ($file | Out-String) -split "\n\n"
-    [string]$array = ''
-    [string]$dirport = ''
-    [string]$portnum = 0
-    [string]$dirwwpn = ''
-    foreach ($textbolock in $textbolocks) {
+
+            Originator Node wwn : 200000051efd3cb3
+            Originator Port wwn : 100000051efd3cb3
+            etc..
+
+    .PARAMETER Path
+        Specifies one or more login files or patterns to process. Defaults to "./logins*.txt".
         
-        $lines = $textbolock -split "\n"
-        foreach($line in $lines) {
-            if ($line -ne '') {
-                if ($line -match 'Symmetrix ID\s+:\s+(\S+)') {
-                $array = $matches[1]
-                $array_count++
-                break
+    .EXAMPLE
+        # Process all logins*.txt files in current directory and save the output and array
+        $allLogins = Get-PowerMaxLogins
+        $allLogins|where {$_.wwpn -match 'c050760aa89f005[0-7]'}|ft
 
-                }elseif ($line -match 'Director Identification\s+:\s+(\S+)') {
-                    # Director Identification : FA-1D
-                    $dirport = ($matches[1]).Substring(3,2)
-                }elseif ($line -match 'Director Port\s+:\s+(\S+)') {
-                    $portnum = [int]$matches[1]
-                }elseif ($line -match 'WWN Port Name\s+:\s+(\S+)') {
-                    $dirwwpn = $matches[1]
-                    break
-
-                }elseif ($line -match 'Originator Node wwn\s+:\s+(\S+)') {
-                    $login = (''|Select-Object array,dirport,dirwwpn,wwnn,wwpn,fcid,init_name,logged_in,on_fabric,logtime)
-                    $login.wwnn = $matches[1]
-                    $login.array = $array
-                    $login.dirport = "$dirport-$portnum"
-                    $login.dirwwpn = $dirwwpn
-                }elseif ($line -match 'Originator Port wwn\s+:\s+(\S+)') {
-                    $login.wwpn = $matches[1]
-                }elseif ($line -match 'User-generated Name\s+:\s+(\S+)') {
-                    if ($matches[1] -ne '/') {
-                        $login.init_name = $matches[1]
-                    }
-                }elseif ($line -match 'FCID\s+:\s+(\S+)') {
-                    $login.fcid = $matches[1]
-                }elseif ($line -match 'Logged In\s+:\s+(\S+)') {
-                    $login.logged_in = $matches[1]
-                }elseif ($line -match 'On Fabric\s+:\s+(\S+)') {
-                    $login.on_fabric = $matches[1]
-                }elseif ($line -match 'Last Active Log-In\s+:\s+(.*)') {
-                    $login.logtime = $matches[1]
-                    Write-Debug $login|ConvertTo-Json 
-                    [Void]$allLogins.Add($login)
-                }
-
-            }
+        # Process all logins*.txt files in current directory and output to console
+        Get-PowerMaxLogins | format-table
+    
+        # Process specific files and export to CSV
+        Get-PowerMaxLogins -Path "C:\Logs\logins-001.txt", "C:\Logs\logins-002.txt" -OutputFile "output.csv"
+    
+        # Process files using wildcard and pipe to other commands
+        Get-PowerMaxLogins -Path "C:\Logs\logins-*.txt" | Where-Object { $_.LoggedIn -eq "Yes" }
+    
+        # Pipe files from Get-ChildItem
+        Get-ChildItem -Path "C:\Logs" -Filter "logins-*.txt" | Get-PowerMaxLogins
+    #>
+    [CmdletBinding()]
+    param (
+        [Parameter(ValueFromPipeline = $true,
+            ValueFromPipelineByPropertyName = $true,
+            Position = 0)]
+        [Alias("FullName", "PSPath")]
+        [string[]]$Path = @("./logins*.txt")
+    )
+    
+    begin {
+        # to enable debug output set $DebugPreference = 'Continue'
+        # $DebugPreference = 'continue'
+        #
+        # Initialize variables
+        #
+        # Pre-compile regex patterns for better performance
+        $regexPatterns = @{
+            ArrayId           = 'Symmetrix ID\s+:\s+(\S+)'
+            DirectorId        = 'Director Identification\s+:\s+(\S+)'
+            DirectorPort      = 'Director Port\s+:\s+(\S+)'
+            WwnPortName       = 'WWN Port Name\s+:\s+(\S+)'
+            OriginatorNodeWwn = 'Originator Node wwn\s+:\s+(\S+)'
+            OriginatorPortWwn = 'Originator Port wwn\s+:\s+(\S+)'
+            UserGeneratedName = 'User-generated Name\s+:\s+(\S+)'
+            Fcid              = 'FCID\s+:\s+(\S+)'
+            LoggedIn          = 'Logged In\s+:\s+(\S+)'
+            OnFabric          = 'On Fabric\s+:\s+(\S+)'
+            LastActiveLogin   = 'Last Active Log-In\s+:\s+(.*)'
+        }
+        $arrayCount = 0
+        $allLogins = [System.Collections.ArrayList]::new()
+        $processedFiles = 0
+        $exportToFile = $PSBoundParameters.ContainsKey('OutputFile')
+            
+        if ($exportToFile -and (Test-Path -Path $OutputFile)) {
+            Write-Warning "Output file already exists and will be overwritten: $OutputFile"
         }
     }
+    
+    process {
+        try {
+            # Resolve file paths, expanding wildcards if any
+            $filesToProcess = $Path | ForEach-Object {
+                if (Test-Path -Path $_) {
+                    Get-Item -Path $_
+                }
+                else {
+                    Write-Warning "Path not found: $_"
+                }
+            } | Where-Object { $_ -is [System.IO.FileInfo] }
+    
+            if ($filesToProcess.Count -eq 0) {
+                Write-Warning "No matching files found."
+                return
+            }
+    
+            foreach ($file in $filesToProcess) {
+                $processedFiles++
+                Write-Progress -Activity "Processing files" -Status $file.Name -PercentComplete (($processedFiles / $filesToProcess.Count) * 100)
+                    
+                try {
+                    $fileContent = [System.IO.File]::ReadAllText($file.FullName)
+                    $textBlocks = $fileContent -split '(?:\r?\n){2,}'
+                        
+                    $currentArray = $null
+                    $currentDirPort = $null
+                    $currentPortNum = $null
+                    $currentDirWwpn = $null
+                    $currentLogin = $null
+    
+                    foreach ($block in $textBlocks) {
+                        $lines = $block -split '\r?\n'
+                            
+                        foreach ($line in $lines) {
+                            $line = $line.Trim()
+                            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+    
+                            switch -Regex ($line) {
+                                $regexPatterns.ArrayId {
+                                    $currentArray = $matches[1]
+                                    $arrayCount++
+                                    break
+                                }
+                                $regexPatterns.DirectorId {
+                                    $currentDirPort = $matches[1].Substring(3, 2)
+                                    break
+                                }
+                                $regexPatterns.DirectorPort {
+                                    $currentPortNum = [int]$matches[1]
+                                    break
+                                }
+                                $regexPatterns.WwnPortName {
+                                    $currentDirWwpn = $matches[1]
+                                    break
+                                }
+                                $regexPatterns.OriginatorNodeWwn {
+                                    $currentLogin = [PSCustomObject]@{
+                                        Array      = $currentArray
+                                        DirPort    = if ($currentDirPort -and $currentPortNum) { "$currentDirPort-$currentPortNum" } else { $null }
+                                        DirWwpn    = $currentDirWwpn
+                                        Wwnn       = $matches[1]
+                                        Wwpn       = $null
+                                        Fcid       = $null
+                                        InitName   = $null
+                                        LoggedIn   = $null
+                                        OnFabric   = $null
+                                        LogTime    = $null
+                                        SourceFile = $file.Name
+                                    }
+                                    break
+                                }
+                                $regexPatterns.OriginatorPortWwn {
+                                    if ($currentLogin) { $currentLogin.Wwpn = $matches[1] }
+                                    break
+                                }
+                                $regexPatterns.UserGeneratedName {
+                                    if ($currentLogin -and $matches[1] -ne '/') { 
+                                        $currentLogin.InitName = $matches[1] 
+                                    }
+                                    break
+                                }
+                                $regexPatterns.Fcid {
+                                    if ($currentLogin) { $currentLogin.Fcid = $matches[1] }
+                                    break
+                                }
+                                $regexPatterns.LoggedIn {
+                                    if ($currentLogin) { $currentLogin.LoggedIn = $matches[1] }
+                                    break
+                                }
+                                $regexPatterns.OnFabric {
+                                    if ($currentLogin) { $currentLogin.OnFabric = $matches[1] }
+                                    break
+                                }
+                                $regexPatterns.LastActiveLogin {
+                                    if ($currentLogin) {
+                                        $currentLogin.LogTime = $matches[1]
+                                        [void]$allLogins.Add($currentLogin)
+                                        # For debugging, output the current login to the pipeline
+                                        Write-Debug $currentLogin | ConvertTo-Json
+                                        $currentLogin = $null
+                                    }
+                                    break
+                                }
+                            }
+                        }
+                    }
+                }
+                catch {
+                    Write-Error "Error processing file $($file.Name): $_"
+                }
+            }
+        }
+        catch {
+            Write-Error "Error: $_"
+        }
+    }
+    
+    end {
+        Write-Progress -Activity "Processing files" 
+        Write-Verbose "Processed $($allLogins.Count) logins from $array_count arrays."
+        # Return the results in an array
+        $allLogins
+    }
 }
-Write-Host "Processed $($allLogins.Count) logins from $array_count arrays."
-$allLogins|Export-Csv -Path pmax-logins.csv -NoTypeInformation
-$allLogins|where {$_.wwpn -match 'c050760aa89f005[0-7]'}|ft
+
+# file is being run as a script
+if ($MyInvocation.InvocationName -ne '.') {
+    Get-AllPmaxLogins
+    $VerbosePreference = "Continue"
+    $OutputFile = "pmax-logins.csv"
+    $allLogins = Import-PmaxLogins -Path "logins-*.txt"
+    # $allLogins = Import-PmaxLogins -Path "logins-000197901097.txt"
+    $allLogins | where-object { $_.wwpn -match 'c050760aa89f005[0-7]' } | format-table -Wrap
+    $allLogins | Export-Csv -Path $OutputFile -NoTypeInformation
+     
+}
